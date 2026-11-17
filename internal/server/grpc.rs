@@ -119,8 +119,8 @@ impl BlobService for BlobServer {
     ) -> Result<Response<proto::ListBlobsResponse>, Status> {
         let req = request.into_inner();
 
-        if !(1..=100).contains(&req.limit) {
-            return Err(Status::invalid_argument("limit must be between 1 and 100"));
+        if !(1..=500).contains(&req.limit) {
+            return Err(Status::invalid_argument("limit must be between 1 and 500"));
         }
 
         let blobs = self
