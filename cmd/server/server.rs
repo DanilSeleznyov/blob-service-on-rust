@@ -4,6 +4,8 @@ use blob_service_on_rust::{
 };
 use tonic::transport::Server;
 
+const MAX_MESSAGE_SIZE: usize = 32 * 1024 * 1024;
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cfg = config::load()?;
@@ -14,7 +16,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("gRPC server is listening on {addr}");
 
     Server::builder()
-        .add_service(BlobServiceServer::new(server))
+        .add_service(
+            BlobServiceServer::new(server)
+                .max_decoding_message_size(MAX_MESSAGE_SIZE)
+                .max_encoding_message_size(MAX_MESSAGE_SIZE),
+        )
         .serve(addr)
         .await?;
 

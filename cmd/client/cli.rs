@@ -24,6 +24,15 @@ pub struct CreateArgs {
 
     #[arg(long, value_delimiter = ',')]
     pub tags: Vec<String>,
+
+    #[arg(long = "metadata", value_delimiter = ',', value_parser = parse_key_val)]
+    pub metadata: Vec<(String, String)>,
+
+    #[arg(long = "owner-id")]
+    pub owner_id: Option<String>,
+
+    #[arg(long = "access-level")]
+    pub access_level: Option<String>,
 }
 
 #[derive(Args)]
@@ -56,14 +65,30 @@ pub struct UpdateArgs {
     pub id: String,
 
     #[arg(long)]
-    pub file: PathBuf,
+    pub file: Option<PathBuf>,
+
+    #[arg(long)]
+    pub name: Option<String>,
+
+    #[arg(long = "content-type")]
+    pub content_type: Option<String>,
 
     #[arg(long, value_delimiter = ',')]
     pub tags: Vec<String>,
+
+    #[arg(long = "metadata", value_delimiter = ',', value_parser = parse_key_val)]
+    pub metadata: Vec<(String, String)>,
 }
 
 #[derive(Args)]
 pub struct DeleteArgs {
     #[arg(long)]
     pub id: String,
+}
+
+fn parse_key_val(s: &str) -> Result<(String, String), String> {
+    match s.split_once('=') {
+        Some((key, value)) if !key.is_empty() => Ok((key.to_owned(), value.to_owned())),
+        _ => Err(format!("expected KEY=VALUE, got `{s}`")),
+    }
 }

@@ -24,9 +24,9 @@ impl BlobService for BlobServer {
     ) -> Result<Response<proto::CreateBlobResponse>, Status> {
         let req = request.into_inner();
 
-        if req.name.is_empty() || req.data.is_empty() || req.content_type.is_empty() {
+        if req.name.is_empty() || req.content_type.is_empty() {
             return Err(Status::invalid_argument(
-                "name, data, and content_type are required",
+                "name and content_type are required",
             ));
         }
 
@@ -34,7 +34,7 @@ impl BlobService for BlobServer {
             .repo
             .create(&req)
             .await
-            .map_err(|e| Status::internal(format!("failed to create blob: {e}")))?;
+            .map_err(|e| db_status("create blob", e))?;
 
         Ok(Response::new(proto::CreateBlobResponse {
             blob: Some(blob),
@@ -52,7 +52,7 @@ impl BlobService for BlobServer {
             .repo
             .get(id)
             .await
-            .map_err(|e| Status::internal(format!("failed to get blob: {e}")))?
+            .map_err(|e| db_status("get blob", e))?
             .ok_or_else(|| Status::not_found("blob not found"))?;
 
         Ok(Response::new(proto::GetBlobResponse { blob: Some(blob) }))
@@ -63,20 +63,30 @@ impl BlobService for BlobServer {
         request: Request<proto::UpdateBlobRequest>,
     ) -> Result<Response<proto::UpdateBlobResponse>, Status> {
         let req = request.into_inner();
+        let id = parse_id(&req.id)?;
 
-        if req.name.is_empty() || req.data.is_empty() || req.content_type.is_empty() {
+        if matches!(req.name.as_deref(), Some(""))
+            || matches!(req.content_type.as_deref(), Some(""))
+        {
             return Err(Status::invalid_argument(
-                "name, data, and content_type are required",
+                "name and content_type must not be empty",
             ));
         }
 
-        let id = parse_id(&req.id)?;
+        if req.name.is_none()
+            && req.content_type.is_none()
+            && req.data.is_none()
+            && req.tags.is_empty()
+            && req.metadata.is_empty()
+        {
+            return Err(Status::invalid_argument("nothing to update"));
+        }
 
         let blob = self
             .repo
             .update(id, &req)
             .await
-            .map_err(|e| Status::internal(format!("failed to update blob: {e}")))?
+            .map_err(|e| db_status("update blob", e))?
             .ok_or_else(|| Status::not_found("blob not found"))?;
 
         Ok(Response::new(proto::UpdateBlobResponse {
@@ -95,7 +105,7 @@ impl BlobService for BlobServer {
             .repo
             .delete(id)
             .await
-            .map_err(|e| Status::internal(format!("failed to delete blob: {e}")))?
+            .map_err(|e| db_status("delete blob", e))?
             .ok_or_else(|| Status::not_found("blob not found"))?;
 
         Ok(Response::new(proto::DeleteBlobResponse {
@@ -109,15 +119,15 @@ impl BlobService for BlobServer {
     ) -> Result<Response<proto::ListBlobsResponse>, Status> {
         let req = request.into_inner();
 
-        if req.limit <= 0 {
-            return Err(Status::invalid_argument("limit must be greater than 0"));
+        if !(1..=100).contains(&req.limit) {
+            return Err(Status::invalid_argument("limit must be between 1 and 100"));
         }
 
         let blobs = self
             .repo
             .list(&req)
             .await
-            .map_err(|e| Status::internal(format!("failed to get blobs: {e}")))?;
+            .map_err(|e| db_status("get blobs", e))?;
 
         Ok(Response::new(proto::ListBlobsResponse { blobs }))
     }
@@ -129,4 +139,15 @@ fn parse_id(id: &str) -> Result<Uuid, Status> {
     }
 
     Uuid::parse_str(id).map_err(|_| Status::invalid_argument("invalid id"))
+}
+
+fn db_status(action: &str, error: sqlx::Error) -> Status {
+    if let sqlx::Error::Database(db) = &error {
+        if db.code().as_deref() == Some("22001") {
+            return Status::invalid_argument("field value is too long");
+        }
+    }
+
+    eprintln!("failed to {action}: {error}");
+    Status::internal(format!("failed to {action}"))
 }

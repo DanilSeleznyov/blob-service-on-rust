@@ -9,6 +9,7 @@ use std::{error::Error, ffi::OsStr, fs, io, path::Path};
 use tonic::transport::Channel;
 
 const GRPC_ADDR: &str = "http://localhost:50051";
+const MAX_MESSAGE_SIZE: usize = 32 * 1024 * 1024;
 const EVENT_CREATED: &str = "CREATED";
 const EVENT_FOUND: &str = "FOUND";
 const EVENT_UPDATED: &str = "UPDATED";
@@ -65,6 +66,9 @@ async fn run_create(
         content_type,
         data,
         tags: args.tags,
+        metadata: args.metadata.into_iter().collect(),
+        owner_id: args.owner_id.unwrap_or_default(),
+        access_level: args.access_level.unwrap_or_default(),
     };
     let response = client.create_blob(request).await?.into_inner();
 
@@ -103,25 +107,19 @@ async fn run_update(
     client: &mut BlobServiceClient<Channel>,
     args: UpdateArgs,
 ) -> Result<(), Box<dyn Error>> {
-    let data = fs::read(&args.file)?;
-    let name = Path::new(&args.file)
-        .file_name()
-        .and_then(OsStr::to_str)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid file name"))?
-        .to_owned();
-    let content_type = mime_guess::from_path(&args.file)
-        .first_or_octet_stream()
-        .to_string();
+    let data = match &args.file {
+        Some(path) => Some(fs::read(path)?),
+        None => None,
+    };
 
     let response = client
         .update_blob(UpdateBlobRequest {
             id: args.id,
-            name,
-            content_type,
+            name: args.name,
+            content_type: args.content_type,
             data,
             tags: args.tags,
-            metadata: Default::default(),
-            access_level: String::new(),
+            metadata: args.metadata.into_iter().collect(),
         })
         .await?
         .into_inner();
@@ -170,7 +168,7 @@ async fn run_list(
             blob.id, blob.name, blob.size, blob.tags
         );
     }
-    println!("Total: {}", response.blobs.len());
+    println!("Shown: {}", response.blobs.len());
     Ok(())
 }
 
@@ -178,7 +176,11 @@ async fn run_list(
 async fn main() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
 
-    let mut client = BlobServiceClient::connect(GRPC_ADDR).await?;
+    let addr = std::env::var("GRPC_ADDR").unwrap_or_else(|_| GRPC_ADDR.to_owned());
+    let mut client = BlobServiceClient::connect(addr)
+        .await?
+        .max_decoding_message_size(MAX_MESSAGE_SIZE)
+        .max_encoding_message_size(MAX_MESSAGE_SIZE);
 
     match cli.command {
         Command::Create(args) => run_create(&mut client, args).await?,
